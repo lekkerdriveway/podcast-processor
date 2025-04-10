@@ -13,6 +13,17 @@ This solution implements a fully automated serverless pipeline for processing po
 5. Generate a summary using Claude 3.7
 6. Format and store markdown output
 
+[Architecture Diagram](docs/architecture.md)
+
+## Prerequisites
+
+- **AWS Account** with permissions for:
+  - S3, Lambda, Step Functions, IAM, CloudFormation
+  - Bedrock access for Claude 3.7 and Data Automation
+- **Node.js** (v16 or later)
+- **AWS CLI** configured with appropriate credentials
+- **AWS CDK** installed globally (`npm install -g aws-cdk`)
+
 ## Key Components
 
 - **S3 Buckets**: For storing input MP3 files, intermediate transcripts, and output summaries
@@ -41,25 +52,15 @@ The infrastructure is defined using AWS CDK with a proper stack separation:
 - `StepFunctionsStack`: Defines the workflow and state machine
 - `TriggersStack`: Manages S3 event notifications to trigger the workflow
 
-## Testing
-
-Run the local test suite to verify functionality:
-
-```bash
-./test-local.sh
-```
-
-This will:
-1. Test the Bedrock Lambda proxy functions
-2. Test the transcript processor
-3. Test the summarizer with Claude 3.7
-4. Test the markdown formatter
-
 ## Deployment
 
 Deploy the full solution to AWS:
 
 ```bash
+# Install dependencies
+npm install
+
+# Deploy the solution (will bootstrap CDK if needed)
 ./deploy.sh
 ```
 
@@ -74,14 +75,50 @@ The script will:
 2. The Step Functions workflow will automatically start processing
 3. The summarized markdown output will be available in the output bucket
 
-## Customization
+## Customizing the System Prompt
 
-- Modify the system prompt in the summarizer function to customize the output format
-- Adjust wait times in the Step Functions workflow based on your podcast length
-- Update the formatter function to change the markdown structure
+The summarizer uses a system prompt to guide Claude 3.7's output. You can customize this in:
+`src/functions/summarizer/custom-system-prompt.json`
 
-## Debugging
+The default prompt asks Claude to generate:
+1. Episode name
+2. Film featured in the episode
+3. Short episode summary
+4. A "cheat sheet" of actionable insights
+5. Search terms for the episode
+
+Example format:
+
+```markdown
+# Episode 5: Raising Resilient Kids
+
+## Film: Inside Out
+
+In this episode Billy and Nick discuss emotional resilience in children, in the context of Pixar's Inside Out. They explore how the film's portrayal of emotions offers a framework for helping children understand and process their feelings.
+
+## Parenting Cheat Sheet: Building Emotional Resilience
+
+1. **Name emotions**: Help children identify and label their feelings
+2. **Validate experiences**: Acknowledge that all emotions are valid and important
+3. **Create safe spaces**: Designate areas where children can express big emotions
+4. **Model regulation**: Demonstrate healthy emotional processing yourself
+5. **Use media as teaching tools**: Reference familiar characters when discussing emotions
+
+## Search Terms
+- Emotional intelligence children
+- Inside Out parenting lessons
+- Resilience skills toddlers
+- Validating children's feelings
+- Pediatric emotional development
+```
+
+## Troubleshooting
 
 If you encounter deployment issues with Bedrock service integrations, check that:
 - You're deploying to a region where Bedrock is fully available (us-west-2 recommended)
+- Your AWS account has been granted access to Bedrock services
 - The Lambda proxy approach bypasses Step Functions service integration limitations
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
