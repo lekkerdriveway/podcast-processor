@@ -3,6 +3,9 @@ cdk.out/
 .cdk.staging/
 cdk-outputs.json
 
+# Lambda layers
+layers/boto3/
+
 # Node.js dependencies
 node_modules/
 

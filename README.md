@@ -60,14 +60,18 @@ Deploy the full solution to AWS:
 # Install dependencies
 npm install
 
+# Create the boto3 Lambda layer (required before first deployment)
+./create-boto3-layer.sh
+
 # Deploy the solution (will bootstrap CDK if needed)
 ./deploy.sh
 ```
 
-The script will:
+The deployment process:
 1. Install dependencies
-2. Bootstrap your AWS environment (if needed)
-3. Deploy all stacks
+2. Create the boto3 Lambda layer (needs to be run once or when updating boto3)
+3. Bootstrap your AWS environment (if needed)
+4. Deploy all stacks
 
 ## Usage
 
