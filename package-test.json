@@ -1,0 +1,15 @@
+{
+  "name": "podcast-processor-tests",
+  "version": "1.0.0",
+  "description": "Test suite for Podcast Processor",
+  "scripts": {
+    "test": "jest",
+    "test:s3-event": "node test-s3-event-bridge.js"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-stepfunctions": "^3.395.0"
+  }
+}

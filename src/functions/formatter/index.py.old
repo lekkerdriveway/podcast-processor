@@ -1,0 +1,166 @@
+import boto3
+import json
+import os
+import re
+from datetime import datetime
+
+s3 = boto3.client('s3')
+OUTPUT_BUCKET = os.environ.get('OUTPUT_BUCKET')
+
+def handler(event, context):
+    """
+    Format the summary into a markdown document and save to S3.
+    
+    Args:
+        event: Contains the summary and metadata
+        context: Lambda context
+        
+    Returns:
+        Dictionary with status and output information
+    """
+    print(f"Formatting output with event: {json.dumps(event)[:500]}...")
+    
+    summary = event.get('summary')
+    metadata = event.get('metadata', {})
+    
+    if not summary:
+        raise ValueError("No summary provided in the event")
+    
+    if not OUTPUT_BUCKET:
+        raise ValueError("OUTPUT_BUCKET environment variable not set")
+    
+    try:
+        # Parse the summary to extract the components
+        episode_name = extract_episode_name(summary)
+        film = extract_film(summary)
+        episode_summary = extract_episode_summary(summary)
+        cheat_sheet = extract_cheat_sheet(summary)
+        search_terms = extract_search_terms(summary)
+        
+        # Generate the markdown
+        markdown = format_markdown(
+            episode_name, 
+            film, 
+            episode_summary, 
+            cheat_sheet, 
+            search_terms, 
+            metadata
+        )
+        
+        # Generate the output filename
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', episode_name)
+        output_key = f"summaries/{safe_name}.md"
+        
+        # Write to S3
+        print(f"Writing markdown to S3 bucket: {OUTPUT_BUCKET}, key: {output_key}")
+        s3.put_object(
+            Bucket=OUTPUT_BUCKET,
+            Key=output_key,
+            Body=markdown,
+            ContentType='text/markdown'
+        )
+        
+        print(f"Successfully wrote markdown file to S3: {output_key}")
+        
+        return {
+            "status": "success",
+            "outputKey": output_key,
+            "episodeName": episode_name,
+            "film": film
+        }
+        
+    except Exception as e:
+        print(f"Error formatting output: {str(e)}")
+        raise e
+
+def extract_episode_name(summary):
+    """Extract the episode name from the summary."""
+    pattern = r"1\)\s*(?:The name of the episode:?\s*)?([^\n]+)"
+    match = re.search(pattern, summary)
+    if match:
+        return match.group(1).strip()
+    print("Could not extract episode name, using default")
+    return "Untitled Episode"
+
+def extract_film(summary):
+    """Extract the film name from the summary."""
+    pattern = r"2\)\s*(?:the film featured in the episode:?\s*)?([^\n]+)"
+    match = re.search(pattern, summary)
+    if match:
+        return match.group(1).strip()
+    print("Could not extract film name, using default")
+    return "Unknown Film"
+
+def extract_episode_summary(summary):
+    """Extract the episode summary from the summary."""
+    pattern = r"3\)\s*(?:A short summary of the episode:?\s*)?(In this episode Billy and Nick discuss.+?)(?=\n\s*4\)|\Z)"
+    match = re.search(pattern, summary, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    print("Could not extract episode summary, using default")
+    return "No summary available."
+
+def extract_cheat_sheet(summary):
+    """Extract the cheat sheet from the summary."""
+    pattern = r"4\)\s*(?:a single page.+?cheat sheet:?\s*)?(.*?)(?=\n\s*5\)|\Z)"
+    match = re.search(pattern, summary, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    print("Could not extract cheat sheet, using default")
+    return "No cheat sheet available."
+
+def extract_search_terms(summary):
+    """Extract search terms from the summary."""
+    pattern = r"5\)\s*(?:5 search terms.+?:?\s*)?(.*?)(?=\Z)"
+    match = re.search(pattern, summary, re.DOTALL)
+    if match:
+        terms_text = match.group(1).strip()
+        # Extract individual terms, handling different formats
+        terms = re.findall(r'["\']([^"\']+)["\']|(?:^|\n)\s*[-•*]?\s*([^,\n]+)(?:,|\n|$)', terms_text)
+        # Flatten and clean the list
+        flat_terms = [t[0] or t[1] for t in terms if t[0] or t[1]]
+        terms_list = [term.strip() for term in flat_terms if term.strip()]
+        if terms_list:
+            return terms_list
+    
+    print("Could not extract search terms, using default")
+    return ["podcast", "parenting", "film", "advice", "children"]
+
+def format_markdown(episode_name, film, episode_summary, cheat_sheet, search_terms, metadata):
+    """Format the components into a structured markdown document."""
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    
+    # Format search terms as a bulleted list
+    search_terms_md = "\n".join([f"- {term}" for term in search_terms])
+    
+    # Format the cheat sheet content
+    # If the cheat sheet is already formatted with bullets, keep it as is
+    if not any(line.strip().startswith('-') or line.strip().startswith('*') for line in cheat_sheet.split('\n')):
+        # Try to split by sentences or lines if not already formatted
+        lines = re.findall(r'[^.!?\n]+[.!?\n]', cheat_sheet)
+        if lines:
+            cheat_sheet = "\n".join([f"- {line.strip()}" for line in lines if line.strip()])
+    
+    markdown = f"""# {episode_name}
+
+*Generated: {timestamp}*
+
+## Featured Film
+{film}
+
+## Episode Summary
+{episode_summary}
+
+## Parenting Cheat Sheet
+{cheat_sheet}
+
+## Search Terms
+{search_terms_md}
+"""
+    
+    # Add metadata if desired
+    if metadata:
+        original_file = metadata.get('originalFileName', 'Unknown')
+        markdown += f"\n\n---\n*Source: {original_file}*\n"
+    
+    return markdown
