@@ -84,37 +84,42 @@ The deployment process:
 The summarizer uses a system prompt to guide Claude 3.7's output. You can customize this in:
 `src/functions/summarizer/custom-system-prompt.json`
 
-The default prompt asks Claude to generate:
-1. Episode name
-2. Film featured in the episode
-3. Short episode summary
-4. A "cheat sheet" of actionable insights
-5. Search terms for the episode
+The system prompt defines the structure and content of the generated summary. You can modify it to:
+1. Change the output format
+2. Request different types of information
+3. Adjust the style and tone of the summary
+4. Add specific instructions for handling your content
 
-Example format:
+Example format of a generated summary:
 
 ```markdown
-# Episode 5: Raising Resilient Kids
+# Episode 42: Understanding Machine Learning
 
-## Film: Inside Out
+## Topic: Artificial Intelligence
 
-In this episode Billy and Nick discuss emotional resilience in children, in the context of Pixar's Inside Out. They explore how the film's portrayal of emotions offers a framework for helping children understand and process their feelings.
+In this episode, the hosts discuss the fundamentals of machine learning and its applications in everyday technology. They explore how AI systems learn from data and make predictions.
 
-## Parenting Cheat Sheet: Building Emotional Resilience
+## Key Insights
 
-1. **Name emotions**: Help children identify and label their feelings
-2. **Validate experiences**: Acknowledge that all emotions are valid and important
-3. **Create safe spaces**: Designate areas where children can express big emotions
-4. **Model regulation**: Demonstrate healthy emotional processing yourself
-5. **Use media as teaching tools**: Reference familiar characters when discussing emotions
+1. **Types of ML**: Overview of supervised, unsupervised, and reinforcement learning
+2. **Data requirements**: How to prepare and structure data for ML models
+3. **Ethical considerations**: Addressing bias and transparency in AI systems
+4. **Practical applications**: Real-world examples of ML in various industries
+5. **Future trends**: Emerging technologies and research directions
 
 ## Search Terms
-- Emotional intelligence children
-- Inside Out parenting lessons
-- Resilience skills toddlers
-- Validating children's feelings
-- Pediatric emotional development
+- Machine learning fundamentals
+- AI data preparation
+- Ethical AI development
+- Practical machine learning applications
+- Future of artificial intelligence
 ```
+
+To customize the system prompt for your specific content:
+1. Open the `custom-system-prompt.json` file
+2. Modify the "systemPrompt" value with your desired instructions
+3. Be specific about the structure and elements you want in the output
+4. Redeploy the application for changes to take effect
 
 ## Troubleshooting
 
