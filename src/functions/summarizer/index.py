@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 
+s3 = boto3.client('s3')
 bedrock = boto3.client('bedrock-runtime')
 MODEL_ID = os.environ.get('MODEL_ID', 'anthropic.claude-3-7-sonnet-20250219-v1:0')
 
@@ -38,7 +39,7 @@ def handler(event, context):
     Generate a summary of the podcast transcript using Claude 3.7.
     
     Args:
-        event: Contains the transcript and metadata
+        event: Contains the transcript location and metadata
         context: Lambda context
         
     Returns:
@@ -46,11 +47,59 @@ def handler(event, context):
     """
     print(f"Generating summary with event: {json.dumps(event)[:500]}...")
     
-    transcript = event.get('transcript')
+    # Get transcript location from event
+    transcript_location = event.get('transcript_location', {})
+    bucket = transcript_location.get('bucket')
+    key = transcript_location.get('key')
     metadata = event.get('metadata', {})
     
-    if not transcript:
-        raise ValueError("No transcript provided in the event")
+    if not bucket or not key:
+        raise ValueError(f"Missing transcript location information: bucket={bucket}, key={key}")
+    
+    try:
+        # Fetch the transcript from S3
+        print(f"Retrieving transcript from S3: bucket={bucket}, key={key}")
+        response = s3.get_object(Bucket=bucket, Key=key)
+        transcript_data = json.loads(response['Body'].read().decode('utf-8'))
+        
+        # Process the transcript based on structure
+        transcript = ""
+        
+        # Try to extract transcript from the standardOutput format
+        if isinstance(transcript_data, dict) and 'standardOutput' in transcript_data:
+            std_output = transcript_data['standardOutput']
+            if 'audio' in std_output:
+                audio_data = std_output['audio']
+                if 'extraction' in audio_data and 'text' in audio_data['extraction']:
+                    text_data = audio_data['extraction']['text']
+                    if 'segments' in text_data:
+                        segments = text_data['segments']
+                        for segment in segments:
+                            start_time = segment.get('startTime', 0)
+                            text = segment.get('text', '')
+                            start_formatted = f"{int(start_time // 60):02d}:{int(start_time % 60):02d}"
+                            transcript += f"[{start_formatted}] {text}\n\n"
+                    elif 'content' in text_data:
+                        transcript = text_data['content']
+        
+        # If we couldn't find the transcript in the expected structure, try common patterns
+        if not transcript and isinstance(transcript_data, dict):
+            if 'text' in transcript_data:
+                transcript = transcript_data['text']
+            elif 'transcript' in transcript_data:
+                transcript = transcript_data['transcript']
+            elif 'content' in transcript_data:
+                transcript = transcript_data['content']
+        
+        # Last resort fallback
+        if not transcript:
+            print("Could not find transcript in expected format, using raw JSON")
+            transcript = json.dumps(transcript_data, indent=2)
+            
+        print(f"Retrieved transcript with length: {len(transcript)}")
+    except Exception as e:
+        print(f"Error retrieving transcript from S3: {str(e)}")
+        raise e
     
     # Load system prompt from JSON file
     system_prompt = load_system_prompt()
@@ -78,9 +127,16 @@ def handler(event, context):
     # Create the request for Claude 3.7
     request = {
         "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 4000,
-        "temperature": 0.7,
+        "max_tokens": 10000,
+        # Temperature and sampling params not compatible with thinking feature
+        #"temperature": 0.2,   # Lower temperature for more focused outputs
+        #"top_p": 0.95,        # Limit to the most probable tokens (95% cumulative probability)
+        #"top_k": 30,          # Limit to the top 30 most likely tokens
         "system": system_prompt,  # System prompt as top-level parameter
+        "thinking": {
+            "type": "enabled", 
+            "budget_tokens": 4000  # Allocate tokens for reasoning process
+        },
         "messages": [
             {
                 "role": "user",
@@ -98,14 +154,31 @@ def handler(event, context):
         )
         
         response_body = json.loads(response["body"].read())
-        summary = response_body["content"][0]["text"]
+        
+        # Find the text content using next() - works regardless of position or thinking being enabled
+        text_item = next((item for item in response_body["content"] if item.get("type") == "text"), None)
+        if text_item and "text" in text_item:
+            summary = text_item["text"]
+        else:
+            print(f"Error: Unable to find text content in response: {json.dumps(response_body)[:1000]}")
+            raise ValueError("No text content found in the model response")
         
         print(f"Successfully generated summary with length: {len(summary)}")
         print(f"Summary preview: {summary[:500]}...")
         
+        # Return only essential data to stay within Step Functions payload limits
+        # Extract only necessary metadata fields if needed
+        essential_metadata = {}
+        if metadata:
+            # Include only essential metadata fields that the formatter needs
+            # For example, we might need the original filename or other small metadata
+            if "originalFileName" in metadata:
+                essential_metadata["originalFileName"] = metadata["originalFileName"]
+            # Add other essential metadata fields as needed
+        
         return {
             "summary": summary,
-            "metadata": metadata
+            "essential_metadata": essential_metadata
         }
         
     except Exception as e:

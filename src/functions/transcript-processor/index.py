@@ -97,9 +97,15 @@ def handler(event, context):
         
         print(f"Successfully processed transcript with length: {len(full_transcript)}")
         
-        # Return the processed transcript and metadata
+        # Store processed transcript in metadata for reference
+        metadata['transcriptLength'] = len(full_transcript)
+        
+        # Return the S3 location instead of the full transcript
         return {
-            'transcript': full_transcript,
+            'transcript_location': {
+                'bucket': transcript_bucket,
+                'key': transcript_key
+            },
             'metadata': metadata
         }
         

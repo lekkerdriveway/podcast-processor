@@ -108,6 +108,7 @@ export class StepFunctionsStack extends cdk.Stack {
     // Allow Lambda to access S3 buckets
     props.transcriptsBucket.grantReadWrite(bedrockTranscribeFunction);
     props.transcriptsBucket.grantReadWrite(bedrockStatusFunction);
+    props.transcriptsBucket.grantRead(props.summarizerFunction); // Allow summarizer to read transcripts from S3
     if (props.inputBucket) {
       props.inputBucket.grantReadWrite(bedrockTranscribeFunction); // Changed from grantRead to grantReadWrite
     }
@@ -171,8 +172,7 @@ export class StepFunctionsStack extends cdk.Stack {
     // Process transcript task
     const processTranscript = new tasks.LambdaInvoke(this, 'ProcessTranscript', {
       lambdaFunction: props.transcriptProcessorFunction,
-      inputPath: '$',
-      // Remove outputPath to use the direct Lambda response
+      // Removed inputPath: '$' to prevent passing the entire state object
       payload: sfn.TaskInput.fromObject({
         TranscriptionStatus: {
           OutputBucket: sfn.JsonPath.stringAt('$.TranscriptionStatus.Payload.OutputBucket'),
@@ -181,31 +181,54 @@ export class StepFunctionsStack extends cdk.Stack {
         },
         originalFileName: sfn.JsonPath.stringAt('$$.Execution.Input.key')
       }),
+      // Extract only the specific fields needed from the Lambda response - updated to use transcript_location
+      resultSelector: {
+        'transcript_location.$': '$.Payload.transcript_location',
+        'metadata.$': '$.Payload.metadata'
+      },
       retryOnServiceExceptions: true,
       resultPath: '$.ProcessingResult'
     });
 
-    // 5. Generate summary using Claude 3.7
+    // 5. Generate summary using Claude 3.7 - now passing transcript location instead of full content
     const generateSummary = new tasks.LambdaInvoke(this, 'GenerateSummary', {
       lambdaFunction: props.summarizerFunction,
-      inputPath: '$',
-      // Remove outputPath to use the direct Lambda response
+      // Removed inputPath: '$' to prevent passing the entire state object
+      // Now passing transcript location instead of the full transcript content
       payload: sfn.TaskInput.fromObject({
-        transcript: sfn.JsonPath.stringAt('$.ProcessingResult.Payload.transcript'),
-        metadata: sfn.JsonPath.stringAt('$.ProcessingResult.Payload.metadata')
+        transcript_location: {
+          bucket: sfn.JsonPath.stringAt('$.ProcessingResult.transcript_location.bucket'),
+          key: sfn.JsonPath.stringAt('$.ProcessingResult.transcript_location.key')
+        },
+        metadata: sfn.JsonPath.stringAt('$.ProcessingResult.metadata')
       }),
+      // Extract only the specific fields needed from the Lambda response
+      resultSelector: {
+        'summary.$': '$.Payload.summary',
+        'metadata.$': '$.Payload.essential_metadata'
+      },
+      // Add outputPath to strictly filter what gets stored in the state machine
+      outputPath: '$',
       retryOnServiceExceptions: true,
       resultPath: '$.SummaryResult'
     });
 
-    // 6. Format output as markdown
+    // Add a Pass state to explicitly filter the summary results
+    const filterSummaryResult = new sfn.Pass(this, 'FilterSummaryResult', {
+      parameters: {
+        'summary.$': '$.SummaryResult.summary',
+        'metadata.$': '$.SummaryResult.metadata'
+      },
+      resultPath: '$.FilteredSummary'
+    });
+
+    // 6. Format output as markdown - updated to use FilteredSummary
     const formatOutput = new tasks.LambdaInvoke(this, 'FormatOutput', {
       lambdaFunction: props.formatterFunction,
-      inputPath: '$',
-      // Remove outputPath to use the direct Lambda response
+      // Removed inputPath: '$' to prevent passing the entire state object
       payload: sfn.TaskInput.fromObject({
-        summary: sfn.JsonPath.stringAt('$.SummaryResult.Payload.summary'),
-        metadata: sfn.JsonPath.stringAt('$.SummaryResult.Payload.metadata')
+        summary: sfn.JsonPath.stringAt('$.FilteredSummary.summary'),
+        metadata: sfn.JsonPath.stringAt('$.FilteredSummary.metadata')
       }),
       retryOnServiceExceptions: true,
       resultPath: '$.FormattingResult'
@@ -218,9 +241,10 @@ export class StepFunctionsStack extends cdk.Stack {
     generateSummary.addCatch(summarizationFailed);
     formatOutput.addCatch(formattingFailed);
 
-    // Chain the post-processing tasks
+    // Chain the post-processing tasks with the new filter state
     processTranscript
       .next(generateSummary)
+      .next(filterSummaryResult)
       .next(formatOutput)
       .next(workflowComplete);
 

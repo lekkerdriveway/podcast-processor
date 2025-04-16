@@ -41,11 +41,27 @@ def handler(event, context):
         film_name = "Unknown Film"
         episode_number = None
         
-        # Try to find the episode name (likely at the beginning)
-        for line in lines[:10]:  # Check the first few lines
-            if line.strip() and not line.startswith('#') and len(line.strip()) < 100:
-                episode_name = line.strip()
-                break
+        # First try to extract from the very first line which should be a header
+        if lines and lines[0].strip().startswith('#'):
+            # Remove the # and any leading/trailing whitespace
+            first_line_content = lines[0].lstrip('#').strip()
+            episode_name = first_line_content
+            print(f"Using first line as episode name: {episode_name}")
+        else:
+            # Try to find the episode name pattern in the header format: # Episode X: Film & Title
+            first_line_pattern = re.search(r'#\s*Episode\s+\d+:(.+?)(?:\n|$)', summary, re.IGNORECASE)
+            if first_line_pattern:
+                # Get the content after "Episode X:"
+                first_line_content = first_line_pattern.group(1).strip()
+                episode_name = first_line_content
+                print(f"Using header pattern match as episode name: {episode_name}")
+            else:
+                # Fallback: look for non-header lines at the beginning (original method)
+                for line in lines[:10]:  # Check the first few lines
+                    if line.strip() and not line.startswith('#') and len(line.strip()) < 100:
+                        episode_name = line.strip()
+                        print(f"Using fallback method for episode name: {episode_name}")
+                        break
         
         # Look for episode number patterns in the summary or title
         # Check for patterns like "Episode X", "EP X", "#X"
@@ -60,14 +76,14 @@ def handler(event, context):
             # Check in episode name first
             match = re.search(pattern, episode_name, re.IGNORECASE)
             if match:
-                episode_number = match.group(1).zfill(2)  # Pad with leading zero
+                episode_number = match.group(1).zfill(3)  # Pad with leading zeros to make it 3 digits
                 break
                 
             # If not found in title, check first 500 chars of summary
             if not episode_number:
                 match = re.search(pattern, summary[:500], re.IGNORECASE)
                 if match:
-                    episode_number = match.group(1).zfill(2)
+                    episode_number = match.group(1).zfill(3)
                     break
         
         # If episode number still not found, look for original filename pattern
@@ -75,11 +91,11 @@ def handler(event, context):
             filename = metadata.get('originalFileName', '')
             match = re.search(r'(\d+)', filename)
             if match:
-                episode_number = match.group(1).zfill(2)
+                episode_number = match.group(1).zfill(3)
         
         # Default to 00 if no episode number found
         if not episode_number:
-            episode_number = "00"
+            episode_number = "000"
         
         # Try to find the film name (likely after "Film:" or similar text)
         film_pattern = re.search(r'(?:film|movie|featured film)[:\s]+([^\n]+)', summary, re.IGNORECASE)
@@ -89,8 +105,19 @@ def handler(event, context):
         # Use the Claude output directly without any header
         markdown = clean_summary
         
-        # Generate the output filename (sanitize it)
-        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', episode_name)
+        # Clean the episode name by removing any "Episode X" prefix patterns
+        episode_name = re.sub(r'^(?:Episode|Ep\.?)\s+\d+\s*[-:]\s*', '', episode_name, flags=re.IGNORECASE)
+        print(f"Cleaned episode name: {episode_name}")
+        
+        # Generate the output filename (sanitize it but preserve spaces for readability)
+        # Replace colons with hyphens and other problematic characters with underscores
+        safe_name = episode_name.replace(':', ' -')
+        safe_name = re.sub(r'[^\w\s&-]', '_', safe_name)
+        # Replace multiple spaces/underscores with a single space
+        safe_name = re.sub(r'[\s_]+', ' ', safe_name)
+        # Strip leading/trailing spaces
+        safe_name = safe_name.strip()
+        # Create output key with 3-digit episode number followed by sanitized name
         output_key = f"summaries/{episode_number} - {safe_name}.md"
         
         # Write to S3
